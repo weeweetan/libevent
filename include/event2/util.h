@@ -58,9 +58,6 @@ extern "C" {
 #endif
 #include <stdarg.h>
 #ifdef EVENT__HAVE_NETDB_H
-#if !defined(_GNU_SOURCE)
-#define _GNU_SOURCE
-#endif
 #include <netdb.h>
 #endif
 
@@ -426,6 +423,18 @@ int evutil_make_listen_socket_reuseable(evutil_socket_t sock);
 EVENT2_EXPORT_SYMBOL
 int evutil_make_listen_socket_reuseable_port(evutil_socket_t sock);
 
+/** Set ipv6 only bind socket option to make listener work only in ipv6 sockets.
+
+    According to RFC3493 and most Linux distributions, default value for the
+    sockets is to work in IPv4-mapped mode. In IPv4-mapped mode, it is not possible
+    to bind same port from different IPv4 and IPv6 handlers.
+
+    @param sock The socket to make in ipv6only working mode
+    @return 0 on success, -1 on failure
+ */
+EVENT2_EXPORT_SYMBOL
+int evutil_make_listen_socket_ipv6only(evutil_socket_t sock);
+
 /** Do platform-specific operations as needed to close a socket upon a
     successful execution of one of the exec*() functions.
 
@@ -439,7 +448,8 @@ int evutil_make_socket_closeonexec(evutil_socket_t sock);
     socket() or accept().
 
     @param sock The socket to be closed
-    @return 0 on success, -1 on failure
+    @return 0 on success (whether the operation is supported or not),
+            -1 on failure
  */
 EVENT2_EXPORT_SYMBOL
 int evutil_closesocket(evutil_socket_t sock);
@@ -471,6 +481,7 @@ int evutil_socket_geterror(evutil_socket_t sock);
 /** Convert a socket error to a string. */
 EVENT2_EXPORT_SYMBOL
 const char *evutil_socket_error_to_string(int errcode);
+#define EVUTIL_INVALID_SOCKET INVALID_SOCKET
 #elif defined(EVENT_IN_DOXYGEN_)
 /**
    @name Socket error functions
@@ -494,14 +505,16 @@ const char *evutil_socket_error_to_string(int errcode);
 #define evutil_socket_geterror(sock) ...
 /** Convert a socket error to a string. */
 #define evutil_socket_error_to_string(errcode) ...
+#define EVUTIL_INVALID_SOCKET -1
 /**@}*/
-#else
+#else /** !EVENT_IN_DOXYGEN_ && !_WIN32 */
 #define EVUTIL_SOCKET_ERROR() (errno)
 #define EVUTIL_SET_SOCKET_ERROR(errcode)		\
 		do { errno = (errcode); } while (0)
 #define evutil_socket_geterror(sock) (errno)
 #define evutil_socket_error_to_string(errcode) (strerror(errcode))
-#endif
+#define EVUTIL_INVALID_SOCKET -1
+#endif /** !_WIN32 */
 
 
 /**

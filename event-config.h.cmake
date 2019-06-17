@@ -202,6 +202,12 @@
 /* Define to 1 if you have the <netinet/tcp.h> header file. */
 #cmakedefine EVENT__HAVE_NETINET_TCP_H 1
 
+/* Define to 1 if you have the <sys/un.h> header file. */
+#cmakedefine EVENT__HAVE_SYS_UN_H 1
+
+/* Define to 1 if you have the <afunix.h> header file. */
+#cmakedefine EVENT__HAVE_AFUNIX_H 1
+
 /* Define if the system has openssl */
 #cmakedefine EVENT__HAVE_OPENSSL 1
 
@@ -252,6 +258,9 @@
 
 /* Define to 1 if you have the `signal' function. */
 #cmakedefine EVENT__HAVE_SIGNAL 1
+
+/* Define to 1 if you have the `strsignal' function. */
+#cmakedefine EVENT__HAVE_STRSIGNAL 1
 
 /* Define to 1 if you have the `splice' function. */
 #cmakedefine EVENT__HAVE_SPLICE 1
@@ -307,6 +316,9 @@
 /* Define to 1 if `sin_len' is member of `struct sockaddr_in'. */
 #cmakedefine EVENT__HAVE_STRUCT_SOCKADDR_IN_SIN_LEN 1
 
+/* Define to 1 if the system has the type `struct sockaddr_un'. */
+#cmakedefine EVENT__HAVE_STRUCT_SOCKADDR_UN 1
+
 /* Define to 1 if the system has the type `struct sockaddr_storage'. */
 #cmakedefine EVENT__HAVE_STRUCT_SOCKADDR_STORAGE 1
 
@@ -321,9 +333,6 @@
 
 /* Define to 1 if you have the `sysctl' function. */
 #cmakedefine EVENT__HAVE_SYSCTL 1
-
-/* Define to 1 if you have the <sys/devpoll.h> header file. */
-#cmakedefine EVENT__HAVE_SYS_DEVPOLL_H 1
 
 /* Define to 1 if you have the <sys/epoll.h> header file. */
 #cmakedefine EVENT__HAVE_SYS_EPOLL_H 1
@@ -461,9 +470,6 @@
 /* The size of `size_t', as computed by sizeof. */
 #define EVENT__SIZEOF_SIZE_T @EVENT__SIZEOF_SIZE_T@
 
-/* Define to 1 if you have the ANSI C header files. */
-#cmakedefine EVENT__STDC_HEADERS 1
-
 /* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */
 #cmakedefine EVENT__TIME_WITH_SYS_TIME 1
 
@@ -472,16 +478,6 @@
 
 /* The size of 'void *', as computer by sizeof */
 #define EVENT__SIZEOF_VOID_P @EVENT__SIZEOF_VOID_P@
-
-/* set an alias for whatever __func__ __FUNCTION__ is, what sillyness */
-#if defined (__func__)
-#define EVENT____func__ __func__
-#elif defined(__FUNCTION__)
-#define EVENT____func__  __FUNCTION__
-#else
-#define EVENT____func__ __FILE__
-#endif
-
 
 /* Define to `__inline__' or `__inline' if that's what the C compiler
    calls it, or to nothing if 'inline' is not supported under any name.  */
@@ -499,8 +495,8 @@
 #define EVENT__inline @EVENT__inline@
 #endif
 
-/* Define to `int' if <sys/tyes.h> does not define. */
-#define EVENT__pid_t @EVENT__pid_t@
+#cmakedefine EVENT__HAVE___func__ 1
+#cmakedefine EVENT__HAVE___FUNCTION__ 1
 
 /* Define to `unsigned' if <sys/types.h> does not define. */
 #define EVENT__size_t @EVENT__size_t@

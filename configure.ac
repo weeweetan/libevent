@@ -230,6 +230,7 @@ AC_CHECK_HEADERS([ \
   netinet/in.h \
   netinet/in6.h \
   netinet/tcp.h \
+  sys/un.h \
   poll.h \
   port.h \
   stdarg.h \
@@ -380,6 +381,7 @@ AC_CHECK_FUNCS([ \
   setrlimit \
   sigaction \
   signal \
+  strsignal \
   splice \
   strlcpy \
   strsep \
@@ -478,7 +480,7 @@ fi
 AC_MSG_CHECKING(for F_SETFD in fcntl.h)
 AC_EGREP_CPP(yes,
 [
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 #include <fcntl.h>
 #ifdef F_SETFD
 yes
@@ -666,14 +668,17 @@ AC_CHECK_SIZEOF(void *)
 AC_CHECK_SIZEOF(off_t)
 AC_CHECK_SIZEOF(time_t)
 
-AC_CHECK_TYPES([struct in6_addr, struct sockaddr_in6, sa_family_t, struct addrinfo, struct sockaddr_storage], , ,
-[#define _GNU_SOURCE
+AC_CHECK_TYPES([struct in6_addr, struct sockaddr_in6, struct sockaddr_un, sa_family_t, struct addrinfo, struct sockaddr_storage], , ,
+[#define _GNU_SOURCE 1
 #include <sys/types.h>
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
 #endif
 #ifdef HAVE_NETINET_IN6_H
 #include <netinet/in6.h>
+#endif
+#ifdef HAVE_SYS_UN_H
+#include <sys/un.h>
 #endif
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
@@ -727,7 +732,11 @@ AC_CHECK_TYPES([struct linger],,,
 AC_MSG_CHECKING([for socklen_t])
 AC_TRY_COMPILE([
  #include <sys/types.h>
- #include <sys/socket.h>],
+ #ifdef _WIN32
+ #include <ws2tcpip.h>
+ #else
+ #include <sys/socket.h>
+ #endif],
   [socklen_t x;],
   AC_MSG_RESULT([yes]),
   [AC_MSG_RESULT([no])
@@ -735,21 +744,23 @@ AC_TRY_COMPILE([
 	[Define to unsigned int if you dont have it])]
 )
 
+# __func__/__FUNCTION__ is not a macros in general
 AC_MSG_CHECKING([whether our compiler supports __func__])
 AC_TRY_COMPILE([],
- [ const char *cp = __func__; ],
- AC_MSG_RESULT([yes]),
- AC_MSG_RESULT([no])
- AC_MSG_CHECKING([whether our compiler supports __FUNCTION__])
- AC_TRY_COMPILE([],
-   [ const char *cp = __FUNCTION__; ],
-   AC_MSG_RESULT([yes])
-   AC_DEFINE(__func__, __FUNCTION__,
-         [Define to appropriate substitue if compiler doesnt have __func__]),
-   AC_MSG_RESULT([no])
-   AC_DEFINE(__func__, __FILE__,
-         [Define to appropriate substitue if compiler doesnt have __func__])))
-
+  [ const char *cp = __func__; ],
+  [ AC_DEFINE(HAVE___func__, 1, [Define to 1 if compiler have __func__])
+    AC_MSG_RESULT([yes])
+  ],
+  AC_MSG_RESULT([no])
+)
+AC_MSG_CHECKING([whether our compiler supports __FUNCTION__])
+AC_TRY_COMPILE([],
+  [ const char *cp = __FUNCTION__; ],
+  [ AC_DEFINE(HAVE___FUNCTION__, 1, [Define to 1 if compiler have __FUNCTION__])
+    AC_MSG_RESULT([yes])
+  ],
+  AC_MSG_RESULT([no])
+)
 
 # check if we can compile with pthreads
 have_pthreads=no
@@ -817,7 +828,8 @@ if test x$enable_gcc_warnings != xno && test "$GCC" = "yes"; then
 #error
 #endif])], have_clang=yes, have_clang=no)
 
-  CFLAGS="$CFLAGS -W -Wfloat-equal -Wundef -Wpointer-arith -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wredundant-decls -Wchar-subscripts -Wcomment -Wformat -Wwrite-strings -Wmissing-declarations -Wredundant-decls -Wnested-externs -Wbad-function-cast -Wswitch"
+  # -W is the same as -Wextra
+  CFLAGS="$CFLAGS -W -Wfloat-equal -Wundef -Wpointer-arith -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wredundant-decls -Wmissing-declarations -Wredundant-decls -Wnested-externs -Wbad-function-cast"
   if test x$enable_gcc_warnings = xyes; then
     CFLAGS="$CFLAGS -Werror"
   fi
@@ -850,7 +862,7 @@ if test x$enable_gcc_warnings != xno && test "$GCC" = "yes"; then
     # for minheap-internal.h related code.
     CFLAGS="$CFLAGS -Wno-unused-function"
 
-    # clang on macosx emits warnigns for each directory specified which
+    # clang on macosx emits warnings for each directory specified which
     # isn't "used" generating a lot of build noise (typically 3 warnings
     # per file
     case "$host_os" in

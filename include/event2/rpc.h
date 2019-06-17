@@ -27,6 +27,8 @@
 #ifndef EVENT2_RPC_H_INCLUDED_
 #define EVENT2_RPC_H_INCLUDED_
 
+/* For int types. */
+#include <event2/util.h>
 #include <event2/visibility.h>
 
 #ifdef __cplusplus
@@ -328,10 +330,10 @@ void evrpc_free(struct evrpc_base *base);
 #define EVRPC_REGISTER(base, name, request, reply, callback, cbarg)	\
 	evrpc_register_generic(base, #name,				\
 	    (void (*)(struct evrpc_req_generic *, void *))callback, cbarg, \
-	    (void *(*)(void *))request##_new, NULL,			\
+	    (void *(*)(void *))request##_new_with_arg, NULL,		\
 	    (void (*)(void *))request##_free,				\
 	    (int (*)(void *, struct evbuffer *))request##_unmarshal,	\
-	    (void *(*)(void *))reply##_new, NULL,			\
+	    (void *(*)(void *))reply##_new_with_arg, NULL,		\
 	    (void (*)(void *))reply##_free, \
 	    (int (*)(void *))reply##_complete, \
 	    (void (*)(struct evbuffer *, void *))reply##_marshal)

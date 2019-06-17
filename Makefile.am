@@ -107,18 +107,42 @@ PLATFORM_DEPENDENT_SRC = \
 	arc4random.c \
 	epoll_sub.c
 
+CMAKE_FILES = \
+	cmake/AddCompilerFlags.cmake \
+	cmake/AddEventLibrary.cmake \
+	cmake/CheckConstExists.cmake \
+	cmake/CheckFileOffsetBits.c \
+	cmake/CheckFileOffsetBits.cmake \
+	cmake/CheckFunctionExistsEx.c \
+	cmake/CheckFunctionExistsEx.cmake \
+	cmake/CheckFunctionKeywords.cmake \
+	cmake/CheckPrototypeDefinition.c.in \
+	cmake/CheckPrototypeDefinition.cmake \
+	cmake/CheckWorkingKqueue.cmake \
+	cmake/CodeCoverage.cmake \
+	cmake/COPYING-CMAKE-SCRIPTS \
+	cmake/Copyright.txt \
+	cmake/FindGit.cmake \
+	cmake/LibeventConfigBuildTree.cmake.in \
+	cmake/LibeventConfig.cmake.in \
+	cmake/LibeventConfigVersion.cmake.in \
+	cmake/VersionViaGit.cmake \
+	event-config.h.cmake \
+	evconfig-private.h.cmake \
+	CMakeLists.txt
+
 EXTRA_DIST = \
 	ChangeLog-1.4 \
 	ChangeLog-2.0 \
 	Doxyfile \
 	LICENSE \
-	Makefile.nmake test/Makefile.nmake \
 	autogen.sh \
 	event_rpcgen.py \
 	libevent.pc.in \
 	make-event-config.sed \
 	whatsnew-2.0.txt \
 	whatsnew-2.1.txt \
+	$(CMAKE_FILES) \
 	$(PLATFORM_DEPENDENT_SRC)
 
 LIBEVENT_LIBS_LA = libevent.la libevent_core.la libevent_extra.la
@@ -154,7 +178,7 @@ if BUILD_WIN32
 SYS_LIBS = -lws2_32 -lshell32 -ladvapi32
 SYS_SRC = win32select.c buffer_iocp.c event_iocp.c \
 	bufferevent_async.c
-SYS_INCLUDES = -IWIN32-Code -IWIN32-Code/nmake
+SYS_INCLUDES = -IWIN32-Code
 
 if THREADS
 SYS_SRC += evthread_win32.c
@@ -213,6 +237,7 @@ CORE_SRC =					\
 	evutil.c				\
 	evutil_rand.c				\
 	evutil_time.c				\
+	watch.c					\
 	listener.c				\
 	log.c					\
 	$(SYS_SRC)
@@ -231,7 +256,11 @@ NO_UNDEFINED =
 MAYBE_CORE =
 endif
 
-GENERIC_LDFLAGS = -version-info $(VERSION_INFO) $(RELEASE) $(NO_UNDEFINED)
+AM_CFLAGS = $(LIBEVENT_CFLAGS)
+AM_CPPFLAGS = -I$(srcdir)/compat -I./include -I$(srcdir)/include $(SYS_INCLUDES) $(LIBEVENT_CPPFLAGS)
+AM_LDFLAGS = $(LIBEVENT_LDFLAGS)
+
+GENERIC_LDFLAGS = -version-info $(VERSION_INFO) $(RELEASE) $(NO_UNDEFINED) $(AM_LDFLAGS)
 
 libevent_la_SOURCES = $(CORE_SRC) $(EXTRAS_SRC)
 libevent_la_LIBADD = @LTLIBOBJS@ $(SYS_LIBS)
@@ -259,16 +288,16 @@ libevent_openssl_la_CPPFLAGS = $(AM_CPPFLAGS) $(OPENSSL_INCS)
 endif
 
 noinst_HEADERS +=				\
-	WIN32-Code/nmake/evconfig-private.h	\
-	WIN32-Code/nmake/event2/event-config.h	\
+	WIN32-Code/getopt.h			\
+	WIN32-Code/getopt.c			\
+	WIN32-Code/getopt_long.c	\
 	WIN32-Code/tree.h			\
-	bufferevent-internal.h			\
-	changelist-internal.h			\
+	bufferevent-internal.h		\
+	changelist-internal.h		\
 	compat/sys/queue.h			\
 	defer-internal.h			\
-	epolltable-internal.h			\
+	epolltable-internal.h		\
 	evbuffer-internal.h			\
-	evconfig-private.h			\
 	event-internal.h			\
 	evmap-internal.h			\
 	evrpc-internal.h			\
@@ -301,8 +330,6 @@ include_HEADERS = $(EVENT1_HDRS)
 else
 noinst_HEADERS += $(EVENT1_HDRS)
 endif
-
-AM_CPPFLAGS = -I$(srcdir)/compat -I$(srcdir)/include -I./include $(SYS_INCLUDES)
 
 verify: check
 

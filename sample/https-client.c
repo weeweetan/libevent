@@ -45,7 +45,6 @@
 
 #include "openssl_hostname_validation.h"
 
-static struct event_base *base;
 static int ignore_cert = 0;
 
 static void
@@ -54,7 +53,7 @@ http_request_done(struct evhttp_request *req, void *ctx)
 	char buffer[256];
 	int nread;
 
-	if (req == NULL) {
+	if (!req || !evhttp_request_get_response_code(req)) {
 		/* If req is NULL, it means an error occurred, but
 		 * sadly we are mostly left guessing what the error
 		 * might have been.  We'll do our best... */
@@ -188,7 +187,7 @@ int
 main(int argc, char **argv)
 {
 	int r;
-
+	struct event_base *base = NULL;
 	struct evhttp_uri *http_uri = NULL;
 	const char *url = NULL, *data_file = NULL;
 	const char *crt = NULL;
@@ -312,7 +311,8 @@ main(int argc, char **argv)
 	}
 	uri[sizeof(uri) - 1] = '\0';
 
-#if (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER)
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L) || \
+	(defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20700000L)
 	// Initialize OpenSSL
 	SSL_library_init();
 	ERR_load_crypto_strings();
@@ -482,13 +482,15 @@ cleanup:
 		evhttp_connection_free(evcon);
 	if (http_uri)
 		evhttp_uri_free(http_uri);
-	event_base_free(base);
+	if (base)
+		event_base_free(base);
 
 	if (ssl_ctx)
 		SSL_CTX_free(ssl_ctx);
 	if (type == HTTP && ssl)
 		SSL_free(ssl);
-#if (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER)
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L) || \
+	(defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20700000L)
 	EVP_cleanup();
 	ERR_free_strings();
 
@@ -501,7 +503,8 @@ cleanup:
 	CRYPTO_cleanup_all_ex_data();
 
 	sk_SSL_COMP_free(SSL_COMP_get_compression_methods());
-#endif /* (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER) */
+#endif /* (OPENSSL_VERSION_NUMBER < 0x10100000L) || \
+	(defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20700000L) */
 
 #ifdef _WIN32
 	WSACleanup();

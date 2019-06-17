@@ -285,7 +285,7 @@ struct event
  * There are many options that can be used to alter the behavior and
  * implementation of an event_base.  To avoid having to pass them all in a
  * complex many-argument constructor, we provide an abstract data type
- * wrhere you set up configation information before passing it to
+ * where you set up configuration information before passing it to
  * event_base_new_with_config().
  *
  * @see event_config_new(), event_config_free(), event_base_new_with_config(),
@@ -632,7 +632,7 @@ int event_config_set_num_cpus_hint(struct event_config *cfg, int cpus);
 /**
  * Record an interval and/or a number of callbacks after which the event base
  * should check for new events.  By default, the event base will run as many
- * events are as activated at the higest activated priority before checking
+ * events are as activated at the highest activated priority before checking
  * for new events.  If you configure it by setting max_interval, it will check
  * the time after each callback, and not allow more than max_interval to
  * elapse before checking for new events.  If you configure it by setting
@@ -693,9 +693,6 @@ void event_base_free(struct event_base *);
 
 /**
    As event_base_free, but do not run finalizers.
-
-   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
-   BECOMES STABLE.
  */
 EVENT2_EXPORT_SYMBOL
 void event_base_free_nofinalize(struct event_base *);
@@ -944,9 +941,6 @@ int event_base_got_break(struct event_base *);
  * To use this option safely, you may need to use event_finalize() or
  * event_free_finalize() in order to safely tear down an event in a
  * multithreaded application.  See those functions for more information.
- *
- * THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
- * BECOMES STABLE.
  **/
 #define EV_FINALIZE     0x40
 /**
@@ -963,11 +957,13 @@ int event_base_got_break(struct event_base *);
 /**
    @name evtimer_* macros
 
-    Aliases for working with one-shot timer events */
+   Aliases for working with one-shot timer events
+   If you need EV_PERSIST timer use event_*() functions.
+ */
 /**@{*/
 #define evtimer_assign(ev, b, cb, arg) \
 	event_assign((ev), (b), -1, 0, (cb), (arg))
-#define evtimer_new(b, cb, arg)	       event_new((b), -1, 0, (cb), (arg))
+#define evtimer_new(b, cb, arg)		event_new((b), -1, 0, (cb), (arg))
 #define evtimer_add(ev, tv)		event_add((ev), (tv))
 #define evtimer_del(ev)			event_del(ev)
 #define evtimer_pending(ev, tv)		event_pending((ev), EV_TIMEOUT, (tv))
@@ -988,6 +984,20 @@ int event_base_got_break(struct event_base *);
 #define evsignal_del(ev)		event_del(ev)
 #define evsignal_pending(ev, tv)	event_pending((ev), EV_SIGNAL, (tv))
 #define evsignal_initialized(ev)	event_initialized(ev)
+/**@}*/
+
+/**
+   @name evuser_* macros
+
+   Aliases for working with user-triggered events
+   If you need EV_PERSIST event use event_*() functions.
+ */
+/**@{*/
+#define evuser_new(b, cb, arg)		event_new((b), -1, 0, (cb), (arg))
+#define evuser_del(ev)			event_del(ev)
+#define evuser_pending(ev, tv)		event_pending((ev), 0, (tv))
+#define evuser_initialized(ev)		event_initialized(ev)
+#define evuser_trigger(ev)		event_active((ev), 0, 0)
 /**@}*/
 
 /**
@@ -1132,10 +1142,6 @@ void event_free(struct event *);
 
 /**
  * Callback type for event_finalize and event_free_finalize().
- *
- * THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
- * BECOMES STABLE.
- *
  **/
 typedef void (*event_finalize_callback_fn)(struct event *, void *);
 /**
@@ -1165,9 +1171,6 @@ typedef void (*event_finalize_callback_fn)(struct event *, void *);
    A finalizer callback must not make events pending or active.  It must not
    add events, activate events, or attempt to "resuscitate" the event being
    finalized in any way.
-
-   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
-   BECOMES STABLE.
 
    @return 0 on success, -1 on failure.
  */
@@ -1259,9 +1262,6 @@ int event_del(struct event *);
    As event_del(), but never blocks while the event's callback is running
    in another thread, even if the event was constructed without the
    EV_FINALIZE flag.
-
-   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
-   BECOMES STABLE.
  */
 EVENT2_EXPORT_SYMBOL
 int event_del_noblock(struct event *ev);
@@ -1269,9 +1269,6 @@ int event_del_noblock(struct event *ev);
    As event_del(), but always blocks while the event's callback is running
    in another thread, even if the event was constructed with the
    EV_FINALIZE flag.
-
-   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
-   BECOMES STABLE.
  */
 EVENT2_EXPORT_SYMBOL
 int event_del_block(struct event *ev);
@@ -1324,7 +1321,7 @@ struct event *event_base_get_running_event(struct event_base *base);
   The event_initialized() function can be used to check if an event has been
   initialized.
 
-  Warning: This function is only useful for distinguishing a a zeroed-out
+  Warning: This function is only useful for distinguishing a zeroed-out
     piece of memory from an initialized event, it can easily be confused by
     uninitialized memory.  Thus, it should ONLY be used to distinguish an
     initialized event from zero.
@@ -1570,7 +1567,7 @@ void event_base_dump_events(struct event_base *, FILE *);
 
    @param base the event_base on which to activate the events.
    @param fd An fd to active events on.
-   @param events One or more of EV_{READ,WRITE}.
+   @param events One or more of EV_{READ,WRITE,TIMEOUT}.
  */
 EVENT2_EXPORT_SYMBOL
 void event_base_active_by_fd(struct event_base *base, evutil_socket_t fd, short events);

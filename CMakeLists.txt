@@ -18,14 +18,17 @@
 #       cmake -G "Visual Studio 10" ..
 #       start libevent.sln
 #
-if (APPLE)
-    cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
-else()
-    cmake_minimum_required(VERSION 2.8.3 FATAL_ERROR)
-endif()
+
+cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 
 if (POLICY CMP0054)
     cmake_policy(SET CMP0054 NEW)
+endif()
+if (POLICY CMP0074)
+    cmake_policy(SET CMP0074 NEW)
+endif()
+if (POLICY CMP0075)
+    cmake_policy(SET CMP0075 NEW)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -37,6 +40,9 @@ string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER)
 # get rid of the extra default configurations
 # what? why would you get id of other useful build types? - Ellzey
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Limited configurations" FORCE)
+
+set(EVENT__LIBRARY_TYPE DEFAULT CACHE STRING
+    "Set library type to SHARED/STATIC/BOTH (default SHARED for MSVC, otherwise BOTH)")
 
 project(libevent C)
 
@@ -119,10 +125,10 @@ option(EVENT__DISABLE_THREAD_SUPPORT
     "Define if libevent should not be compiled with thread support" OFF)
 
 option(EVENT__DISABLE_OPENSSL
-    "Define if libevent should build without support for OpenSSL encrpytion" OFF)
+    "Define if libevent should build without support for OpenSSL encryption" OFF)
 
 option(EVENT__DISABLE_BENCHMARK
-    "Defines if libevent should build without the benchmark exectuables" OFF)
+    "Defines if libevent should build without the benchmark executables" OFF)
 
 option(EVENT__DISABLE_TESTS
     "If tests should be compiled or not" OFF)
@@ -137,7 +143,7 @@ option(EVENT__DISABLE_CLOCK_GETTIME
     "Do not use clock_gettime even if it is available" OFF)
 
 option(EVENT__FORCE_KQUEUE_CHECK
-    "When crosscompiling forces running a test program that verifies that Kqueue works with pipes. Note that this requires you to manually run the test program on the the cross compilation target to verify that it works. See cmake documentation for try_run for more details" OFF)
+    "When crosscompiling forces running a test program that verifies that Kqueue works with pipes. Note that this requires you to manually run the test program on the cross compilation target to verify that it works. See cmake documentation for try_run for more details" OFF)
 
 # TODO: Add --disable-largefile     omit support for large files
 option(EVENT__COVERAGE
@@ -153,6 +159,11 @@ if (EVENT__ENABLE_VERBOSE_DEBUG)
     add_definitions(-DUSE_DEBUG=1)
 endif()
 
+# make it colorful under ninja-build
+if ("${CMAKE_GENERATOR}" STREQUAL "Ninja")
+    add_compiler_flags(-fdiagnostics-color=always)
+endif()
+
 # Setup compiler flags for coverage.
 if (EVENT__COVERAGE)
     if (NOT "${CMAKE_BUILD_TYPE_LOWER}" STREQUAL "debug")
@@ -166,14 +177,112 @@ if (EVENT__COVERAGE)
     set(CMAKE_REQUIRED_LIBRARIES "")
 endif()
 
-# GCC specific options.
-if (CMAKE_COMPILER_IS_GNUCC)
+set(GNUC 0)
+set(CLANG 0)
+set(MSVC 0)
+if (("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang") OR
+    ("${CMAKE_C_COMPILER_ID}" STREQUAL "AppleClang"))
+    set(CLANG 1)
+endif()
+if (("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU") OR (${CLANG}))
+    set(GNUC 1)
+endif()
+if (("${CMAKE_C_COMPILER_ID}" STREQUAL "MSVC") OR ("${CMAKE_C_SIMULATE_ID}" STREQUAL "MSVC"))
+    set(MSVC 1)
+endif()
+
+# Detect library type
+set(EVENT_LIBRARY_TYPE)
+if ("${EVENT__LIBRARY_TYPE}" STREQUAL "DEFAULT")
+    if (${MSVC})
+        set(EVENT_LIBRARY_TYPE SHARED)
+    else()
+        set(EVENT_LIBRARY_TYPE BOTH)
+    endif()
+else()
+    string(TOUPPER "${EVENT__LIBRARY_TYPE}" EVENT_LIBRARY_TYPE)
+endif()
+if ((${MSVC}) AND ("${EVENT_LIBRARY_TYPE}" STREQUAL "BOTH"))
+    message(WARNING
+      "Building SHARED and STATIC is not supported for MSVC "
+      "(due to conflicts in library name"
+      " between STATIC library and IMPORTED library for SHARED libraries)")
+endif()
+set(EVENT_LIBRARY_STATIC OFF)
+set(EVENT_LIBRARY_SHARED OFF)
+if ("${EVENT_LIBRARY_TYPE}" STREQUAL "BOTH")
+    set(EVENT_LIBRARY_STATIC ON)
+    set(EVENT_LIBRARY_SHARED ON)
+elseif ("${EVENT_LIBRARY_TYPE}" STREQUAL "STATIC")
+    set(EVENT_LIBRARY_STATIC ON)
+elseif ("${EVENT_LIBRARY_TYPE}" STREQUAL "SHARED")
+    set(EVENT_LIBRARY_SHARED ON)
+else()
+    message(FATAL_ERROR "${EVENT_LIBRARY_TYPE} is not supported")
+endif()
+
+if (${MSVC})
+    set(msvc_static_runtime OFF)
+    if ("${EVENT_LIBRARY_TYPE}" STREQUAL "STATIC")
+        set(msvc_static_runtime ON)
+    endif()
+
+    # For more info:
+    # - https://docs.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=vs-2017
+    # - https://gitlab.kitware.com/cmake/community/wikis/FAQ#how-can-i-build-my-msvc-application-with-a-static-runtime
+    option(EVENT__MSVC_STATIC_RUNTIME
+           "Link static runtime libraries"
+           ${msvc_static_runtime})
+
+    if (EVENT__MSVC_STATIC_RUNTIME)
+        foreach (flag_var
+                 CMAKE_C_FLAGS
+                 CMAKE_C_FLAGS_DEBUG
+                 CMAKE_C_FLAGS_RELEASE
+                 CMAKE_C_FLAGS_MINSIZEREL
+                 CMAKE_C_FLAGS_RELWITHDEBINFO
+        )
+            if (${flag_var} MATCHES "/MD")
+                string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+            endif()
+        endforeach()
+    endif()
+endif()
+
+# GNUC specific options.
+if (${GNUC})
     option(EVENT__DISABLE_GCC_WARNINGS "Disable verbose warnings with GCC" OFF)
     option(EVENT__ENABLE_GCC_HARDENING "Enable compiler security checks" OFF)
     option(EVENT__ENABLE_GCC_FUNCTION_SECTIONS "Enable gcc function sections" OFF)
     option(EVENT__ENABLE_GCC_WARNINGS "Make all GCC warnings into errors" OFF)
 
-    list(APPEND __FLAGS -Wall -Wswitch)
+    set(GCC_V ${CMAKE_C_COMPILER_VERSION})
+
+    list(APPEND __FLAGS
+         -Wall -Wextra -Wno-unused-parameter -Wstrict-aliasing -Wstrict-prototypes
+
+         -fno-strict-aliasing # gcc 2.9.5+
+         -Wmissing-prototypes
+
+         # gcc 4
+         -Winit-self
+         -Wmissing-field-initializers
+         -Wdeclaration-after-statement
+
+         # gcc 4.2
+         -Waddress
+         -Wnormalized=id
+         -Woverride-init
+
+         # gcc 4.5
+         -Wlogical-op
+
+         -Wwrite-strings
+    )
+
+    if (${CLANG})
+        list(APPEND __FLAGS -Wno-unused-function)
+    endif()
 
     if (EVENT__DISABLE_GCC_WARNINGS)
         list(APPEND __FLAGS -w)
@@ -199,10 +308,6 @@ if (CMAKE_COMPILER_IS_GNUCC)
         list(APPEND __FLAGS -Werror)
     endif()
 
-    # We need to test for at least gcc 2.95 here, because older versions don't
-    # have -fno-strict-aliasing
-    list(APPEND __FLAGS -fno-strict-aliasing)
-
     add_compiler_flags(${__FLAGS})
 endif()
 
@@ -225,7 +330,7 @@ if (SOLARIS)
 endif()
 
 # Check if _GNU_SOURCE is available.
-if (NOT _GNU_SOURCE)
+if (NOT DEFINED _GNU_SOURCE)
   CHECK_SYMBOL_EXISTS(__GNU_LIBRARY__ "features.h" _GNU_SOURCE)
 
   if (NOT _GNU_SOURCE)
@@ -235,7 +340,7 @@ if (NOT _GNU_SOURCE)
 endif()
 
 if (_GNU_SOURCE)
-    add_definitions(-D_GNU_SOURCE)
+    add_definitions(-D_GNU_SOURCE=1)
 endif()
 
 CHECK_INCLUDE_FILE(sys/types.h EVENT__HAVE_SYS_TYPES_H)
@@ -252,6 +357,19 @@ CHECK_INCLUDE_FILE(netinet/in.h EVENT__HAVE_NETINET_IN_H)
 if(EVENT__HAVE_NETINET_IN_H)
     list(APPEND CMAKE_EXTRA_INCLUDE_FILES netinet/in.h)
 endif()
+
+CHECK_INCLUDE_FILE(sys/un.h EVENT__HAVE_SYS_UN_H)
+if(EVENT__HAVE_SYS_UN_H)
+    list(APPEND CMAKE_EXTRA_INCLUDE_FILES sys/un.h)
+endif()
+
+if(WIN32)
+    CHECK_INCLUDE_FILE(afunix.h EVENT__HAVE_AFUNIX_H)
+    if(EVENT__HAVE_AFUNIX_H)
+        list(APPEND CMAKE_EXTRA_INCLUDE_FILES afunix.h)
+    endif()
+endif()
+CHECK_TYPE_SIZE("struct sockaddr_un" EVENT__HAVE_STRUCT_SOCKADDR_UN)
 
 CHECK_INCLUDE_FILE(netinet/in6.h EVENT__HAVE_NETINET_IN6_H)
 if(EVENT__HAVE_NETINET_IN6_H)
@@ -280,7 +398,7 @@ CHECK_INCLUDE_FILE(stdint.h EVENT__HAVE_STDINT_H)
 CHECK_INCLUDE_FILE(stdlib.h EVENT__HAVE_STDLIB_H)
 CHECK_INCLUDE_FILE(strings.h EVENT__HAVE_STRINGS_H)
 CHECK_INCLUDE_FILE(string.h EVENT__HAVE_STRING_H)
-CHECK_INCLUDE_FILE(sys/devpoll.h EVENT__HAVE_SYS_DEVPOLL_H)
+CHECK_INCLUDE_FILE(sys/devpoll.h EVENT__HAVE_DEVPOLL)
 CHECK_INCLUDE_FILE(sys/epoll.h EVENT__HAVE_SYS_EPOLL_H)
 CHECK_INCLUDE_FILE(sys/eventfd.h EVENT__HAVE_SYS_EVENTFD_H)
 CHECK_INCLUDE_FILE(sys/event.h EVENT__HAVE_SYS_EVENT_H)
@@ -329,6 +447,7 @@ CHECK_FUNCTION_EXISTS_EX(port_create EVENT__HAVE_PORT_CREATE)
 CHECK_FUNCTION_EXISTS_EX(sendfile EVENT__HAVE_SENDFILE)
 CHECK_FUNCTION_EXISTS_EX(sigaction EVENT__HAVE_SIGACTION)
 CHECK_FUNCTION_EXISTS_EX(signal EVENT__HAVE_SIGNAL)
+CHECK_FUNCTION_EXISTS_EX(strsignal EVENT__HAVE_STRSIGNAL)
 CHECK_FUNCTION_EXISTS_EX(splice EVENT__HAVE_SPLICE)
 CHECK_FUNCTION_EXISTS_EX(strlcpy EVENT__HAVE_STRLCPY)
 CHECK_FUNCTION_EXISTS_EX(strsep EVENT__HAVE_STRSEP)
@@ -412,7 +531,7 @@ endif()
 check_function_keywords("inline" "__inline" "__inline__")
 
 if (HAVE_INLINE)
-    set (EVENT__inline inline)
+    set(EVENT__inline inline)
 elseif (HAVE___INLINE)
     set(EVENT__inline __inline)
 elseif(HAVE___INLINE__)
@@ -420,6 +539,10 @@ elseif(HAVE___INLINE__)
 else()
     set(EVENT__inline)
 endif()
+
+# __func__/__FUNCTION__ is not a macros in general
+CHECK_SYMBOL_EXISTS("__func__"     "" EVENT__HAVE___func__)
+CHECK_SYMBOL_EXISTS("__FUNCTION__" "" EVENT__HAVE___FUNCTION__)
 
 CHECK_SYMBOL_EXISTS(TAILQ_FOREACH sys/queue.h EVENT__HAVE_TAILQFOREACH)
 CHECK_CONST_EXISTS(CTL_KERN sys/sysctl.h EVENT__HAVE_DECL_CTL_KERN)
@@ -471,10 +594,8 @@ endif()
 
 CHECK_TYPE_SIZE(pid_t EVENT__SIZEOF_PID_T)
 if(NOT EVENT__SIZEOF_PID_T)
-  set(EVENT__pid_t "int")
   set(EVENT__SIZEOF_PID_T ${EVENT__SIZEOF_INT})
 else()
-	set(EVENT__pid_t "pid_t")
 	set(EVENT__SIZEOF_PID_T EVENT__SIZEOF_PID_T)
 endif()
 
@@ -514,10 +635,6 @@ if (EVENT__HAVE_KQUEUE)
         include(CheckWorkingKqueue)
     endif()
 endif()
-
-CHECK_SYMBOL_EXISTS(_MINIX "stdio.h" EVENT___MINIX)
-CHECK_SYMBOL_EXISTS(_POSIX_1_SOURCE "stdio.h" EVENT___POSIX_1_SOURCE)
-CHECK_SYMBOL_EXISTS(_POSIX_SOURCE "stdio.h" EVENT___POSIX_SOURCE)
 
 if(EVENT__HAVE_NETDB_H)
     list(APPEND CMAKE_EXTRA_INCLUDE_FILES netdb.h)
@@ -634,6 +751,7 @@ set(HDR_PUBLIC
     include/event2/event.h
     include/event2/event_compat.h
     include/event2/event_struct.h
+    include/event2/watch.h
     include/event2/http.h
     include/event2/http_compat.h
     include/event2/http_struct.h
@@ -662,6 +780,7 @@ set(SRC_CORE
     evutil.c
     evutil_rand.c
     evutil_time.c
+    watch.c
     listener.c
     log.c
     signal.c
@@ -779,9 +898,7 @@ source_group("Source Extra"     FILES ${SRC_EXTRA})
 # (Place them in the build dir so we don't polute the source tree with generated files).
 include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR}/include)
 
-if ((CMAKE_COMPILER_IS_GNUCC) OR
-    ("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang") OR
-    ("${CMAKE_C_COMPILER_ID}" STREQUAL "AppleClang"))
+if (${GNUC})
     set(EVENT_SHARED_FLAGS -fvisibility=hidden)
 elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "SunPro")
     set(EVENT_SHARED_FLAGS -xldscope=hidden)
@@ -837,17 +954,13 @@ macro(add_sample_prog ssl name)
     add_executable(${name} ${ARGN})
 
     target_link_libraries(${name}
-                          event_extra_static
-                          event_core_static
+                          event_extra
+                          event_core
                           ${LIB_APPS}
                           ${LIB_PLATFORM})
-    add_dependencies(${name}
-                     event_core_static
-                     event_extra_static)
 
     if (${ssl})
-        target_link_libraries(${name} event_openssl_static)
-        add_dependencies(${name} event_openssl_static)
+        target_link_libraries(${name} event_openssl)
     endif()
 endmacro()
 if (NOT EVENT__DISABLE_SAMPLES)
@@ -855,13 +968,16 @@ if (NOT EVENT__DISABLE_SAMPLES)
         event-read-fifo
         hello-world
         signal-test
-        http-server
         http-connect
-        time-test)
+        time-test
+        watch-timing)
 
     foreach(SAMPLE ${SAMPLES})
         add_sample_prog(OFF ${SAMPLE} sample/${SAMPLE}.c)
     endforeach()
+    if (NOT WIN32)
+        target_link_libraries(watch-timing m)
+    endif()
 
     if (NOT EVENT__DISABLE_OPENSSL)
         add_sample_prog(ON https-client
@@ -870,9 +986,16 @@ if (NOT EVENT__DISABLE_SAMPLES)
                         sample/hostcheck.c)
         add_sample_prog(ON le-proxy
                         sample/le-proxy.c)
+        add_sample_prog(ON becat sample/becat.c ${WIN32_GETOPT})
     endif()
 
-    add_sample_prog(OFF dns-example sample/dns-example.c ${WIN32_GETOPT})
+    set(SAMPLES_WOPT
+        dns-example
+        http-server
+    )
+    foreach (SAMPLE ${SAMPLES_WOPT})
+        add_sample_prog(OFF ${SAMPLE} sample/${SAMPLE}.c ${WIN32_GETOPT})
+    endforeach()
 endif()
 
 #
@@ -881,13 +1004,10 @@ endif()
 macro(add_bench_prog prog)
     add_executable(${prog} ${ARGN})
     target_link_libraries(${prog}
-                          event_extra_static
-                          event_core_static
+                          event_extra
+                          event_core
                           ${LIB_APPS}
                           ${LIB_PLATFORM})
-    add_dependencies(${prog}
-                     event_extra_static
-                     event_core_static)
 endmacro()
 if (NOT EVENT__DISABLE_BENCHMARK)
     foreach (BENCHMARK bench_http bench_httpclient)
@@ -906,12 +1026,9 @@ macro(add_test_prog prog)
     target_link_libraries(${prog}
                           ${LIB_APPS}
                           ${LIB_PLATFORM}
-                          event_core_shared
-                          event_extra_shared
+                          event_core
+                          event_extra
                           ${ARGN})
-    add_dependencies(${prog}
-                     event_core_shared
-                     event_extra_shared)
 endmacro()
 if (NOT EVENT__DISABLE_TESTS)
     #
@@ -964,6 +1081,7 @@ if (NOT EVENT__DISABLE_TESTS)
                  test/regress_testutils.c
                  test/regress_testutils.h
                  test/regress_util.c
+                 test/regress_watch.c
                  test/tinytest.c)
 
             if (WIN32)
@@ -988,13 +1106,13 @@ if (NOT EVENT__DISABLE_TESTS)
             target_link_libraries(regress
                                   ${LIB_APPS}
                                   ${LIB_PLATFORM}
-                                  event_core_shared
-                                  event_extra_shared)
+                                  event_core
+                                  event_extra)
             if (NOT EVENT__DISABLE_OPENSSL)
-                target_link_libraries(regress event_openssl_shared)
+                target_link_libraries(regress event_openssl)
             endif()
             if (CMAKE_USE_PTHREADS_INIT)
-                target_link_libraries(regress event_pthreads_shared)
+                target_link_libraries(regress event_pthreads)
             endif()
         else()
             message(WARNING "No suitable Python interpreter found, cannot generate regress tests!")
@@ -1356,29 +1474,56 @@ install(EXPORT LibeventTargets
         DESTINATION "${DEF_INSTALL_CMAKE_DIR}"
         COMPONENT dev)
 
+# Install the scripts.
+install(PROGRAMS
+       ${CMAKE_CURRENT_SOURCE_DIR}/event_rpcgen.py
+       DESTINATION "bin"
+       COMPONENT runtime)
+
+# Create documents with doxygen.
+find_program(DOXYGEN doxygen)
+if (DOXYGEN)
+    add_custom_target(doxygen
+                      COMMAND ${DOXYGEN} Doxyfile
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+else()
+    message(WARNING "The doxygen target will not support since doxygen command was not found!")
+endif()
+
+
+# Create the uninstall target.
+# https://gitlab.kitware.com/cmake/community/wikis/FAQ#can-i-do-make-uninstall-with-cmake
+configure_file(${PROJECT_SOURCE_DIR}/cmake/Uninstall.cmake.in
+               ${PROJECT_BINARY_DIR}/Uninstall.cmake
+               @ONLY)
+
+add_custom_target(uninstall
+                  COMMAND ${CMAKE_COMMAND} -P ${PROJECT_BINARY_DIR}/Uninstall.cmake)
+
+
 message(STATUS "")
 message(STATUS "        ---( Libevent " ${EVENT_VERSION} " )---")
 message(STATUS "")
 message(STATUS "Available event backends: ${BACKENDS}")
-message(STATUS "CMAKE_BINARY_DIR:         " ${CMAKE_BINARY_DIR})
-message(STATUS "CMAKE_CURRENT_BINARY_DIR: " ${CMAKE_CURRENT_BINARY_DIR})
-message(STATUS "CMAKE_SOURCE_DIR:         " ${CMAKE_SOURCE_DIR})
-message(STATUS "CMAKE_CURRENT_SOURCE_DIR: " ${CMAKE_CURRENT_SOURCE_DIR})
-message(STATUS "PROJECT_BINARY_DIR:       " ${PROJECT_BINARY_DIR})
-message(STATUS "PROJECT_SOURCE_DIR:       " ${PROJECT_SOURCE_DIR})
-message(STATUS "CMAKE_MODULE_PATH:        " ${CMAKE_MODULE_PATH})
-message(STATUS "CMAKE_COMMAND:            " ${CMAKE_COMMAND})
-message(STATUS "CMAKE_ROOT:               " ${CMAKE_ROOT} )
-message(STATUS "CMAKE_SYSTEM:             " ${CMAKE_SYSTEM} )
-message(STATUS "CMAKE_SYSTEM_NAME:        " ${CMAKE_SYSTEM_NAME} )
-message(STATUS "CMAKE_SYSTEM_VERSION:     " ${CMAKE_SYSTEM_VERSION} )
-message(STATUS "CMAKE_SYSTEM_PROCESSOR:   " ${CMAKE_SYSTEM_PROCESSOR} )
-message(STATUS "CMAKE_SKIP_RPATH:         " ${CMAKE_SKIP_RPATH} )
-message(STATUS "CMAKE_VERBOSE_MAKEFILE:   " ${CMAKE_VERBOSE_MAKEFILE} )
-message(STATUS "CMAKE_C_FLAGS:            " ${CMAKE_C_FLAGS} )
-message(STATUS "CMAKE_BUILD_TYPE:         " ${CMAKE_BUILD_TYPE} )
-message(STATUS "CMAKE_C_COMPILER:         " ${CMAKE_C_COMPILER} )
-message(STATUS "CMAKE_AR:                 " ${CMAKE_AR} )
-message(STATUS "CMAKE_RANLIB:             " ${CMAKE_RANLIB} )
+message(STATUS "CMAKE_BINARY_DIR:         ${CMAKE_BINARY_DIR}")
+message(STATUS "CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}")
+message(STATUS "CMAKE_SOURCE_DIR:         ${CMAKE_SOURCE_DIR}")
+message(STATUS "CMAKE_CURRENT_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
+message(STATUS "PROJECT_BINARY_DIR:       ${PROJECT_BINARY_DIR}")
+message(STATUS "PROJECT_SOURCE_DIR:       ${PROJECT_SOURCE_DIR}")
+message(STATUS "CMAKE_MODULE_PATH:        ${CMAKE_MODULE_PATH}")
+message(STATUS "CMAKE_COMMAND:            ${CMAKE_COMMAND}")
+message(STATUS "CMAKE_ROOT:               ${CMAKE_ROOT}")
+message(STATUS "CMAKE_SYSTEM:             ${CMAKE_SYSTEM}")
+message(STATUS "CMAKE_SYSTEM_NAME:        ${CMAKE_SYSTEM_NAME}")
+message(STATUS "CMAKE_SYSTEM_VERSION:     ${CMAKE_SYSTEM_VERSION}")
+message(STATUS "CMAKE_SYSTEM_PROCESSOR:   ${CMAKE_SYSTEM_PROCESSOR}")
+message(STATUS "CMAKE_SKIP_RPATH:         ${CMAKE_SKIP_RPATH}")
+message(STATUS "CMAKE_VERBOSE_MAKEFILE:   ${CMAKE_VERBOSE_MAKEFILE}")
+message(STATUS "CMAKE_C_FLAGS:            ${CMAKE_C_FLAGS}")
+message(STATUS "CMAKE_BUILD_TYPE:         ${CMAKE_BUILD_TYPE}")
+message(STATUS "CMAKE_C_COMPILER:         ${CMAKE_C_COMPILER} (id ${CMAKE_C_COMPILER_ID}, clang ${CLANG}, GNUC ${GNUC})")
+message(STATUS "CMAKE_AR:                 ${CMAKE_AR}")
+message(STATUS "CMAKE_RANLIB:             ${CMAKE_RANLIB}")
 message(STATUS "")
 

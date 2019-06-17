@@ -3,6 +3,18 @@ os:
   - osx
 sudo: false
 dist: trusty
+osx_image: xcode10.1
+
+branches:
+  except:
+  - /.*appveyor.*/
+  - /.*win.*/
+  - /.*mingw.*/
+  - /.*freebsd.*/
+  - /.*bitrise.*/
+
+git:
+  quiet: true
 
 env:
   matrix:
@@ -22,6 +34,9 @@ matrix:
   exclude:
     - os: osx
       env: EVENT_BUILD_METHOD=cmake EVENT_CMAKE_OPTIONS="-DEVENT__COVERAGE=ON -DCMAKE_BUILD_TYPE=debug" COVERALLS=yes
+  allow_failures:
+    - os: osx
+  fast_finish: true
 
 language: c
 compiler:
@@ -29,18 +44,18 @@ compiler:
   - clang
 
 before_install:
+  # do not run with clang, since it fails (SIGSEGV)
+  - if [ "$CC" = "clang" ]; then
+      unset COVERALLS;
+    fi
   - if [ -n "$COVERALLS" ]; then
       pip install --user cpp-coveralls;
     fi
   - export JOBS=20
   - export TIMEOUT=50
   - if [ "$TRAVIS_OS_NAME" == "osx" ]; then
-      brew update;
-      brew uninstall libtool && brew install libtool;
-      brew install openssl;
-      brew install lcov;
       if [ "$CC" == "gcc" ]; then
-        export CC=$(ls -t /usr/local/bin/gcc-?.?);
+        export CC=$(ls /usr/local/Cellar/gcc/*/bin/gcc-?);
       fi
 
       export OPENSSL_ROOT=$(echo /usr/local/Cellar/openssl/*);
@@ -51,7 +66,7 @@ before_install:
         CFLAGS=-I$CMAKE_INCLUDE_PATH
         LDFLAGS=-L$CMAKE_LIBRARY_PATH;
 
-      export JOBS=4;
+      export JOBS=1;
     fi
 
 addons:
@@ -67,13 +82,20 @@ addons:
     - autoconf
     - cmake
     - lcov
+  homebrew:
+    packages:
+    - openssl
+    - lcov
+    - libtool
+    - gcc
+
 
 script:
   - if [ "$EVENT_BUILD_METHOD" = "autotools" ]; then
       ./autogen.sh &&
       ./configure $EVENT_CONFIGURE_OPTIONS &&
       make &&
-      travis_retry travis_wait $TIMEOUT make -j $JOBS verify;
+      travis_wait $TIMEOUT make -j $JOBS verify;
     fi
   - if [ "$EVENT_BUILD_METHOD" = "cmake" ]; then
       export
@@ -83,7 +105,7 @@ script:
       mkdir build &&
       cd build &&
       cmake .. $EVENT_CMAKE_OPTIONS &&
-      travis_retry travis_wait $TIMEOUT
+      travis_wait $TIMEOUT
       cmake --build . --target verify;
     fi
 
@@ -99,6 +121,3 @@ after_script:
         --exclude build/CMakeFiles/CompilerIdC
         --gcov-options '\-lp';
     fi
-
-notifications:
-  irc: "irc.oftc.net#libevent"

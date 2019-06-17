@@ -95,6 +95,7 @@
 #include "evthread-internal.h"
 #include "evbuffer-internal.h"
 #include "bufferevent-internal.h"
+#include "event-internal.h"
 
 /* some systems do not have MAP_FAILED */
 #ifndef MAP_FAILED
@@ -138,6 +139,8 @@
 	(ptr)->internal_.chain = NULL;		\
 	(ptr)->internal_.pos_in_chain = 0;	\
 } while (0)
+
+#define EVBUFFER_MAX_READ_DEFAULT	4096
 
 static void evbuffer_chain_align(struct evbuffer_chain *chain);
 static int evbuffer_chain_should_realign(struct evbuffer_chain *chain,
@@ -369,6 +372,7 @@ evbuffer_new(void)
 	LIST_INIT(&buffer->callbacks);
 	buffer->refcnt = 1;
 	buffer->last_with_datap = &buffer->first;
+	buffer->max_read = EVBUFFER_MAX_READ_DEFAULT;
 
 	return (buffer);
 }
@@ -522,8 +526,8 @@ evbuffer_invoke_callbacks_(struct evbuffer *buffer)
 			evbuffer_incref_and_lock_(buffer);
 			if (buffer->parent)
 				bufferevent_incref_(buffer->parent);
+			EVBUFFER_UNLOCK(buffer);
 		}
-		EVBUFFER_UNLOCK(buffer);
 	}
 
 	evbuffer_run_callbacks(buffer, 0);
@@ -590,6 +594,26 @@ evbuffer_free(struct evbuffer *buffer)
 	evbuffer_decref_and_unlock_(buffer);
 }
 
+int evbuffer_set_max_read(struct evbuffer *buf, size_t max)
+{
+	if (max > INT_MAX) {
+		return -1;
+	}
+
+	EVBUFFER_LOCK(buf);
+	buf->max_read = max;
+	EVBUFFER_UNLOCK(buf);
+	return 0;
+}
+size_t evbuffer_get_max_read(struct evbuffer *buf)
+{
+	size_t result;
+	EVBUFFER_LOCK(buf);
+	result = buf->max_read;
+	EVBUFFER_UNLOCK(buf);
+	return result;
+}
+
 void
 evbuffer_lock(struct evbuffer *buf)
 {
@@ -606,13 +630,9 @@ size_t
 evbuffer_get_length(const struct evbuffer *buffer)
 {
 	size_t result;
-
 	EVBUFFER_LOCK(buffer);
-
-	result = (buffer->total_len);
-
+	result = buffer->total_len;
 	EVBUFFER_UNLOCK(buffer);
-
 	return result;
 }
 
@@ -703,13 +723,17 @@ static int
 advance_last_with_data(struct evbuffer *buf)
 {
 	int n = 0;
+	struct evbuffer_chain **chainp = buf->last_with_datap;
+
 	ASSERT_EVBUFFER_LOCKED(buf);
 
-	if (!*buf->last_with_datap)
+	if (!*chainp)
 		return 0;
 
-	while ((*buf->last_with_datap)->next && (*buf->last_with_datap)->next->off) {
-		buf->last_with_datap = &(*buf->last_with_datap)->next;
+	while ((*chainp)->next) {
+		chainp = &(*chainp)->next;
+		if ((*chainp)->off)
+			buf->last_with_datap = chainp;
 		++n;
 	}
 	return n;
@@ -1146,7 +1170,7 @@ evbuffer_drain(struct evbuffer *buf, size_t len)
 		}
 
 		buf->first = chain;
-		EVUTIL_ASSERT(remaining < chain->off);
+		EVUTIL_ASSERT(remaining <= chain->off);
 		chain->misalign += remaining;
 		chain->off -= remaining;
 	}
@@ -1298,7 +1322,7 @@ evbuffer_remove_buffer(struct evbuffer *src, struct evbuffer *dst,
 		chain = chain->next;
 	}
 
-	if (nread) {
+	if (chain != src->first) {
 		/* we can remove the chain */
 		struct evbuffer_chain **chp;
 		chp = evbuffer_free_trailing_empty_chains(dst);
@@ -1534,11 +1558,11 @@ evbuffer_find_eol_char(struct evbuffer_ptr *it)
 	return (-1);
 }
 
-static inline int
+static inline size_t
 evbuffer_strspn(
 	struct evbuffer_ptr *ptr, const char *chrset)
 {
-	int count = 0;
+	size_t count = 0;
 	struct evbuffer_chain *chain = ptr->internal_.chain;
 	size_t i = ptr->internal_.pos_in_chain;
 
@@ -1824,6 +1848,10 @@ evbuffer_prepend(struct evbuffer *buf, const void *data, size_t datlen)
 
 	EVBUFFER_LOCK(buf);
 
+	if (datlen == 0) {
+		result = 0;
+		goto done;
+	}
 	if (buf->freeze_start) {
 		goto done;
 	}
@@ -1877,7 +1905,7 @@ evbuffer_prepend(struct evbuffer *buf, const void *data, size_t datlen)
 	if ((tmp = evbuffer_chain_new(datlen)) == NULL)
 		goto done;
 	buf->first = tmp;
-	if (buf->last_with_datap == &buf->first)
+	if (buf->last_with_datap == &buf->first && chain->off)
 		buf->last_with_datap = &tmp->next;
 
 	tmp->next = chain;
@@ -2195,8 +2223,6 @@ evbuffer_expand(struct evbuffer *buf, size_t datlen)
 #endif
 #define NUM_READ_IOVEC 4
 
-#define EVBUFFER_MAX_READ	4096
-
 /** Helper function to figure out which space to use for reading data into
     an evbuffer.  Internal use only.
 
@@ -2227,11 +2253,13 @@ evbuffer_read_setup_vecs_(struct evbuffer *buf, ev_ssize_t howmuch,
 	so_far = 0;
 	/* Let firstchain be the first chain with any space on it */
 	firstchainp = buf->last_with_datap;
+	EVUTIL_ASSERT(*firstchainp);
 	if (CHAIN_SPACE_LEN(*firstchainp) == 0) {
 		firstchainp = &(*firstchainp)->next;
 	}
 
 	chain = *firstchainp;
+	EVUTIL_ASSERT(chain);
 	for (i = 0; i < n_vecs_avail && so_far < (size_t)howmuch; ++i) {
 		size_t avail = (size_t) CHAIN_SPACE_LEN(chain);
 		if (avail > (howmuch - so_far) && exact)
@@ -2250,18 +2278,18 @@ static int
 get_n_bytes_readable_on_socket(evutil_socket_t fd)
 {
 #if defined(FIONREAD) && defined(_WIN32)
-	unsigned long lng = EVBUFFER_MAX_READ;
+	unsigned long lng = EVBUFFER_MAX_READ_DEFAULT;
 	if (ioctlsocket(fd, FIONREAD, &lng) < 0)
 		return -1;
 	/* Can overflow, but mostly harmlessly. XXXX */
 	return (int)lng;
 #elif defined(FIONREAD)
-	int n = EVBUFFER_MAX_READ;
+	int n = EVBUFFER_MAX_READ_DEFAULT;
 	if (ioctl(fd, FIONREAD, &n) < 0)
 		return -1;
 	return n;
 #else
-	return EVBUFFER_MAX_READ;
+	return EVBUFFER_MAX_READ_DEFAULT;
 #endif
 }
 
@@ -2289,8 +2317,8 @@ evbuffer_read(struct evbuffer *buf, evutil_socket_t fd, int howmuch)
 	}
 
 	n = get_n_bytes_readable_on_socket(fd);
-	if (n <= 0 || n > EVBUFFER_MAX_READ)
-		n = EVBUFFER_MAX_READ;
+	if (n <= 0 || n > (int)buf->max_read)
+		n = (int)buf->max_read;
 	if (howmuch < 0 || howmuch > n)
 		howmuch = n;
 
